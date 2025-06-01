@@ -346,3 +346,30 @@ if __name__ == "__main__":
     file_to_print = Path(__file__).parent / 'README.md'
     with open(file_to_print, 'r') as file:
         print(file.read())
+
+    # Load and prepare data
+    data_path = Path(__file__).parent / "data.csv"  # <- Update filename
+    sdt_data = read_data(data_path, prepare_for='sdt', display=True)
+    delta_data = read_data(data_path, prepare_for='delta plots', display=True)
+
+    # Run the SDT model with main effects
+    model = apply_factorial_sdt_model(sdt_data)
+    with model:
+        trace = pm.sample(draws=1000, tune=1000, target_accept=0.95, return_inferencedata=True)
+
+    # Check convergence
+    az.plot_trace(trace, var_names=[
+        'intercept_d', 'stim_effect_d', 'diff_effect_d',
+        'intercept_c', 'stim_effect_c', 'diff_effect_c'
+    ])
+    plt.tight_layout()
+    plt.show()
+
+    # Print summary table
+    print(az.summary(trace, var_names=[
+        'intercept_d', 'stim_effect_d', 'diff_effect_d',
+        'intercept_c', 'stim_effect_c', 'diff_effect_c'
+    ], hdi_prob=0.95))
+
+    # Generate delta plot for participant 1 (as an example)
+    draw_delta_plots(delta_data, pnum=1)

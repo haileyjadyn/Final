@@ -1,6 +1,7 @@
 """
 Signal Detection Theory (SDT) and Delta Plot Analysis for Response Time Data
 """
+# assisted with AI 
 
 import numpy as np
 import pymc as pm
@@ -348,7 +349,7 @@ if __name__ == "__main__":
         print(file.read())
 
     # Load and prepare data
-    data_path = Path(__file__).parent / "data.csv"  # <- Update filename
+    data_path = Path(__file__).parent / "data.csv"
     sdt_data = read_data(data_path, prepare_for='sdt', display=True)
     delta_data = read_data(data_path, prepare_for='delta plots', display=True)
 

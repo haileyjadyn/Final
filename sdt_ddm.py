@@ -211,6 +211,35 @@ def apply_hierarchical_sdt_model(data):
     
     return sdt_model
 
+def apply_factorial_sdt_model(data):
+    pnums = data['pnum'].unique()
+    p_idx = {p: i for i, p in enumerate(pnums)}
+    data['p_idx'] = data['pnum'].map(p_idx)
+    data['stimulus_type'] = data['condition'] % 2
+    data['difficulty'] = data['condition'] // 2
+    P = len(pnums)
+
+    with pm.Model() as model:
+        intercept_d = pm.Normal('intercept_d', mu=0, sigma=1)
+        stim_effect_d = pm.Normal('stim_effect_d', mu=0, sigma=1)
+        diff_effect_d = pm.Normal('diff_effect_d', mu=0, sigma=1)
+        intercept_c = pm.Normal('intercept_c', mu=0, sigma=1)
+        stim_effect_c = pm.Normal('stim_effect_c', mu=0, sigma=1)
+        diff_effect_c = pm.Normal('diff_effect_c', mu=0, sigma=1)
+        d_subj = pm.Normal('d_subj', mu=0, sigma=1, shape=P)
+        c_subj = pm.Normal('c_subj', mu=0, sigma=1, shape=P)
+
+        d_prime = (intercept_d + stim_effect_d * data['stimulus_type'].values + diff_effect_d * data['difficulty'].values + d_subj[data['p_idx']])
+        criterion = (intercept_c + stim_effect_c * data['stimulus_type'].values + diff_effect_c * data['difficulty'].values + c_subj[data['p_idx']])
+
+        hit_rate = pm.math.invlogit(d_prime - criterion)
+        false_alarm_rate = pm.math.invlogit(-criterion)
+
+        pm.Binomial('hits', n=data['nSignal'], p=hit_rate, observed=data['hits'])
+        pm.Binomial('false_alarms', n=data['nNoise'], p=false_alarm_rate, observed=data['false_alarms'])
+
+    return model
+
 def draw_delta_plots(data, pnum):
     """Draw delta plots comparing RT distributions between condition pairs.
     

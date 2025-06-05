@@ -29,6 +29,10 @@ CONDITION_NAMES = {
 # Percentiles used for delta plot analysis
 PERCENTILES = [10, 30, 50, 70, 90]
 
+# Output directory
+OUTPUT_DIR = Path(__file__).parent / "output"
+OUTPUT_DIR.mkdir(exist_ok=True)
+
 def read_data(file_path, prepare_for='sdt', display=False):
     """Read and preprocess data from a CSV file into SDT format.
     
@@ -413,6 +417,93 @@ def compare_manipulations():
     print("decision-making performance, affecting both accuracy and speed.")
     print("Stimulus complexity primarily affects processing speed without")
     print("substantially altering detection sensitivity or decision criteria.")
+
+# === Additional Utility Functions for Output Files ===
+def save_summary_and_posteriors(trace):
+    summary = az.summary(trace, var_names=[
+        'intercept_d', 'stim_effect_d', 'diff_effect_d',
+        'intercept_c', 'stim_effect_c', 'diff_effect_c'
+    ])
+    summary.to_csv(OUTPUT_DIR / "sdt_summary.csv")
+    az.plot_forest(trace, var_names=[
+        'intercept_d', 'stim_effect_d', 'diff_effect_d',
+        'intercept_c', 'stim_effect_c', 'diff_effect_c'
+    ], combined=True)
+    plt.title("Posterior Distributions")
+    plt.tight_layout()
+    plt.savefig(OUTPUT_DIR / "sdt_posteriors.png")
+    plt.close()
+
+def save_delta_contrast_plot(delta_data):
+    def plot_delta_contrast(delta_data, cond_a, cond_b, label, mode='overall'):
+        percentiles = [f'p{p}' for p in PERCENTILES]
+        diffs = []
+        for p in delta_data['pnum'].unique():
+            d1 = delta_data[(delta_data['pnum'] == p) & (delta_data['condition'] == cond_a) & (delta_data['mode'] == mode)]
+            d2 = delta_data[(delta_data['pnum'] == p) & (delta_data['condition'] == cond_b) & (delta_data['mode'] == mode)]
+            if not d1.empty and not d2.empty:
+                q1 = d1[percentiles].values[0]
+                q2 = d2[percentiles].values[0]
+                diffs.append(q2 - q1)
+        diffs = np.array(diffs)
+        mean_diff = np.mean(diffs, axis=0)
+        sem_diff = np.std(diffs, axis=0) / np.sqrt(len(diffs))
+        plt.errorbar(PERCENTILES, mean_diff, yerr=sem_diff, label=label, marker='o', capsize=5)
+
+    plt.figure(figsize=(8, 6))
+    plot_delta_contrast(delta_data, 0, 1, 'Stimulus Type (Easy)')
+    plot_delta_contrast(delta_data, 2, 3, 'Stimulus Type (Hard)')
+    plot_delta_contrast(delta_data, 0, 2, 'Difficulty (Simple)')
+    plot_delta_contrast(delta_data, 1, 3, 'Difficulty (Complex)')
+    plt.axhline(0, color='gray', linestyle='--')
+    plt.title("Delta Plot: RT Difference (by Percentile)")
+    plt.xlabel("Percentile")
+    plt.ylabel("RT Difference (s)")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(OUTPUT_DIR / "delta_plot_contrasts.png")
+    plt.close()
+
+def save_rt_differences(delta_data):
+    diff_list = []
+    for p in delta_data['pnum'].unique():
+        pdata = delta_data[delta_data['pnum'] == p]
+        for mode in ['overall', 'accurate', 'error']:
+            cond0 = pdata[(pdata['condition'] == 0) & (pdata['mode'] == mode)]
+            cond3 = pdata[(pdata['condition'] == 3) & (pdata['mode'] == mode)]
+            if not cond0.empty and not cond3.empty:
+                rt0 = cond0[[f'p{q}' for q in PERCENTILES]].values[0].astype(float)
+                rt3 = cond3[[f'p{q}' for q in PERCENTILES]].values[0].astype(float)
+                diff = rt3 - rt0
+                diff_list.append({
+                    'pnum': p,
+                    'mode': mode,
+                    **{f'diff_p{q}': diff[i] for i, q in enumerate(PERCENTILES)}
+                })
+    diff_df = pd.DataFrame(diff_list)
+    diff_df.to_csv(OUTPUT_DIR / 'rt_differences_HardComplex_vs_EasySimple.csv', index=False)
+
+# === Main Execution Update ===
+if __name__ == "__main__":
+    print("Loading and preparing data...")
+    sdt_data = read_data("data.csv", prepare_for='sdt', display=True)
+    delta_data = read_data("data.csv", prepare_for='delta plots', display=False)
+
+    print("Running factorial SDT model...")
+    model = apply_factorial_sdt_model(sdt_data)
+    with model:
+        trace = pm.sample(1000, tune=1000, target_accept=0.95, return_inferencedata=True)
+
+    print("Saving posterior summaries and plots...")
+    save_summary_and_posteriors(trace)
+
+    print("Saving delta contrast plot...")
+    save_delta_contrast_plot(delta_data)
+
+    print("Saving RT differences summary...")
+    save_rt_differences(delta_data)
+
+    print("All results saved to the 'output' directory.")
 
 # Main execution
 if __name__ == "__main__":

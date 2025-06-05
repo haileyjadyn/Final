@@ -33,6 +33,7 @@ PERCENTILES = [10, 30, 50, 70, 90]
 OUTPUT_DIR = Path(__file__).parent / "output"
 OUTPUT_DIR.mkdir(exist_ok=True)
 
+# Load and Process Data
 def read_data(file_path, prepare_for='sdt', display=False):
     """Read and preprocess data from a CSV file into SDT format.
     
@@ -166,142 +167,77 @@ def read_data(file_path, prepare_for='sdt', display=False):
 
     return data
 
-def apply_factorial_sdt_model(data):
-    """Apply factorial SDT model with main effects for stimulus type and difficulty."""
-    pnums = data['pnum'].unique()
-    p_idx = {p: i for i, p in enumerate(pnums)}
-    data['p_idx'] = data['pnum'].map(p_idx)
-    data['stimulus_type'] = data['condition'] % 2
-    data['difficulty'] = data['condition'] // 2
-    P = len(pnums)
+def apply_hierarchical_sdt_model(data):
+    """Apply a hierarchical Signal Detection Theory model using PyMC."""
+    P = len(data['pnum'].unique())
+    C = len(data['condition'].unique())
 
-    with pm.Model() as model:
-        # Fixed effects for d-prime (sensitivity)
-        intercept_d = pm.Normal('intercept_d', mu=0, sigma=1)
-        stim_effect_d = pm.Normal('stim_effect_d', mu=0, sigma=1)
-        diff_effect_d = pm.Normal('diff_effect_d', mu=0, sigma=1)
-        
-        # Fixed effects for criterion (response bias)
-        intercept_c = pm.Normal('intercept_c', mu=0, sigma=1)
-        stim_effect_c = pm.Normal('stim_effect_c', mu=0, sigma=1)
-        diff_effect_c = pm.Normal('diff_effect_c', mu=0, sigma=1)
-        
-        # Random effects for participants
-        d_subj = pm.Normal('d_subj', mu=0, sigma=1, shape=P)
-        c_subj = pm.Normal('c_subj', mu=0, sigma=1, shape=P)
+    with pm.Model() as sdt_model:
+        # Group-level means and variances for d' and c
+        mean_d_prime = pm.Normal('mean_d_prime', mu=0.0, sigma=1.0, shape=C)
+        stdev_d_prime = pm.HalfNormal('stdev_d_prime', sigma=1.0)
 
-        # Linear model for d-prime and criterion
-        d_prime = (intercept_d + stim_effect_d * data['stimulus_type'].values + 
-                  diff_effect_d * data['difficulty'].values + d_subj[data['p_idx']])
-        criterion = (intercept_c + stim_effect_c * data['stimulus_type'].values + 
-                    diff_effect_c * data['difficulty'].values + c_subj[data['p_idx']])
+        mean_criterion = pm.Normal('mean_criterion', mu=0.0, sigma=1.0, shape=C)
+        stdev_criterion = pm.HalfNormal('stdev_criterion', sigma=1.0)
 
-        # SDT predictions
+        # Participant-by-condition values
+        d_prime = pm.Normal('d_prime', mu=mean_d_prime, sigma=stdev_d_prime, shape=(P, C))
+        criterion = pm.Normal('criterion', mu=mean_criterion, sigma=stdev_criterion, shape=(P, C))
+
+        # Compute hit and false alarm rates
         hit_rate = pm.math.invlogit(d_prime - criterion)
         false_alarm_rate = pm.math.invlogit(-criterion)
 
         # Likelihood
-        pm.Binomial('hits', n=data['nSignal'], p=hit_rate, observed=data['hits'])
-        pm.Binomial('false_alarms', n=data['nNoise'], p=false_alarm_rate, observed=data['false_alarms'])
+        pm.Binomial('hit_obs',
+                    n=data['nSignal'].values,
+                    p=hit_rate[data['pnum'].values - 1, data['condition'].values],
+                    observed=data['hits'].values)
 
-    return model
+        pm.Binomial('false_alarm_obs',
+                    n=data['nNoise'].values,
+                    p=false_alarm_rate[data['pnum'].values - 1, data['condition'].values],
+                    observed=data['false_alarms'].values)
 
-def plot_posterior_effects(trace):
-    """Create forest plot showing posterior distributions of main effects."""
-    fig, axes = plt.subplots(1, 2, figsize=(12, 6))
-    
-    effects_d = ['intercept_d', 'stim_effect_d', 'diff_effect_d']
-    labels_d = ['Intercept', 'Stimulus Type\n(Complex - Simple)', 'Difficulty\n(Hard - Easy)']
-    
-    az.plot_forest(trace, var_names=effects_d, ax=axes[0], 
-                   combined=True, hdi_prob=0.95)
-    axes[0].set_title("d' (Sensitivity) Effects", fontsize=14, fontweight='bold')
-    axes[0].set_yticklabels(labels_d)
-    axes[0].axvline(0, color='red', linestyle='--', alpha=0.7)
-    
-    effects_c = ['intercept_c', 'stim_effect_c', 'diff_effect_c']
-    labels_c = ['Intercept', 'Stimulus Type\n(Complex - Simple)', 'Difficulty\n(Hard - Easy)']
-    
-    az.plot_forest(trace, var_names=effects_c, ax=axes[1],
-                   combined=True, hdi_prob=0.95)
-    axes[1].set_title("Criterion (Response Bias) Effects", fontsize=14, fontweight='bold')
-    axes[1].set_yticklabels(labels_c)
-    axes[1].axvline(0, color='red', linestyle='--', alpha=0.7)
-    
-    plt.tight_layout()
-    output_path = OUTPUT_DIR / 'posterior_effects.png'
-    plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    print(f"Saved posterior effects plot to: {output_path}")
-    plt.close()
+    return sdt_model
 
 
-def summarize_effects(trace):
-    """Print detailed summary of main effects with interpretation."""
-    print("\n" + "="*60)
-    print("FACTORIAL SDT MODEL RESULTS")
-    print("="*60)
-    
-    # Get summary statistics
+def summarize_hierarchical_effects(trace):
+    """Summarize group-level effects for hierarchical SDT model."""
+    print("\n" + "=" * 60)
+    print("HIERARCHICAL SDT MODEL RESULTS")
+    print("=" * 60)
+
     summary = az.summary(trace, var_names=[
-        'intercept_d', 'stim_effect_d', 'diff_effect_d',
-        'intercept_c', 'stim_effect_c', 'diff_effect_c'
+        'mean_d_prime', 'mean_criterion', 'stdev_d_prime', 'stdev_criterion'
     ], hdi_prob=0.95)
-    
+
     print("\nPOSTERIOR SUMMARY:")
     print(summary)
-    
-    print("\n" + "-"*60)
-    print("INTERPRETATION OF EFFECTS:")
-    print("-"*60)
-    
-    # Extract means for interpretation
-    posterior = trace.posterior
-    
-    # D-prime effects
-    stim_d_mean = float(posterior['stim_effect_d'].mean())
-    diff_d_mean = float(posterior['diff_effect_d'].mean())
-    
-    # Criterion effects
-    stim_c_mean = float(posterior['stim_effect_c'].mean())
-    diff_c_mean = float(posterior['diff_effect_c'].mean())
-    
-    print(f"\nSENSITIVITY (d') EFFECTS:")
-    print(f"  • Stimulus Type Effect: {stim_d_mean:.3f}")
-    if abs(stim_d_mean) > 0.1:
-        direction = "decreases" if stim_d_mean < 0 else "increases"
-        print(f"    → Complex stimuli {direction} sensitivity")
-    else:
-        print(f"    → Minimal effect of stimulus complexity on sensitivity")
-    
-    print(f"  • Difficulty Effect: {diff_d_mean:.3f}")
-    if abs(diff_d_mean) > 0.1:
-        direction = "decreases" if diff_d_mean < 0 else "increases"
-        print(f"    → Hard trials {direction} sensitivity")
-    else:
-        print(f"    → Minimal effect of difficulty on sensitivity")
-        
-    print(f"\nRESPONSE BIAS (CRITERION) EFFECTS:")
-    print(f"  • Stimulus Type Effect: {stim_c_mean:.3f}")
-    if abs(stim_c_mean) > 0.1:
-        direction = "more conservative" if stim_c_mean > 0 else "more liberal"
-        print(f"    → Complex stimuli make participants {direction}")
-    else:
-        print(f"    → Minimal effect of stimulus complexity on response bias")
-        
-    print(f"  • Difficulty Effect: {diff_c_mean:.3f}")
-    if abs(diff_c_mean) > 0.1:
-        direction = "more conservative" if diff_c_mean > 0 else "more liberal"
-        print(f"    → Hard trials make participants {direction}")
-    else:
-        print(f"    → Minimal effect of difficulty on response bias")
 
 def draw_delta_plots(data, pnum):
-    """Draw delta plots comparing RT distributions between condition pairs."""
+    """Draw delta plots comparing RT distributions between condition pairs.
+    
+    Creates a matrix of delta plots where:
+    - Upper triangle shows overall RT distribution differences
+    - Lower triangle shows RT differences split by correct/error responses
+    
+    Args:
+        data: DataFrame with RT percentile data
+        pnum: Participant number to plot
+    """
+    # Filter data for specified participant
     data = data[data['pnum'] == pnum]
+    
+    # Get unique conditions and create subplot matrix
     conditions = data['condition'].unique()
     n_conditions = len(conditions)
     
-    fig, axes = plt.subplots(n_conditions, n_conditions, figsize=(4*n_conditions, 4*n_conditions))
+    # Create figure with subplots matrix
+    fig, axes = plt.subplots(n_conditions, n_conditions, 
+                            figsize=(4*n_conditions, 4*n_conditions))
+    
+    # Define marker style for plots
     marker_style = {
         'marker': 'o',
         'markersize': 10,
@@ -310,97 +246,83 @@ def draw_delta_plots(data, pnum):
         'linewidth': 3
     }
     
+    # Create delta plots for each condition pair
     for i, cond1 in enumerate(conditions):
         for j, cond2 in enumerate(conditions):
+            # Add labels only to edge subplots
             if j == 0:
                 axes[i,j].set_ylabel('Difference in RT (s)', fontsize=12)
             if i == len(axes)-1:
                 axes[i,j].set_xlabel('Percentile', fontsize=12)
+                
+            # Skip diagonal and lower triangle for overall plots
             if i > j:
                 continue
             if i == j:
                 axes[i,j].axis('off')
                 continue
             
+            # Create masks for condition and plotting mode
             cmask1 = data['condition'] == cond1
             cmask2 = data['condition'] == cond2
             overall_mask = data['mode'] == 'overall'
             error_mask = data['mode'] == 'error'
             accurate_mask = data['mode'] == 'accurate'
             
-            quantiles1 = [data[cmask1 & overall_mask][f'p{p}'].iloc[0] for p in PERCENTILES]
-            quantiles2 = [data[cmask2 & overall_mask][f'p{p}'].iloc[0] for p in PERCENTILES]
+            # Calculate RT differences for overall performance
+            quantiles1 = [data[cmask1 & overall_mask][f'p{p}'] for p in PERCENTILES]
+            quantiles2 = [data[cmask2 & overall_mask][f'p{p}'] for p in PERCENTILES]
             overall_delta = np.array(quantiles2) - np.array(quantiles1)
             
-            error_quantiles1 = [data[cmask1 & error_mask][f'p{p}'].iloc[0] for p in PERCENTILES]
-            error_quantiles2 = [data[cmask2 & error_mask][f'p{p}'].iloc[0] for p in PERCENTILES]
+            # Calculate RT differences for error responses
+            error_quantiles1 = [data[cmask1 & error_mask][f'p{p}'] for p in PERCENTILES]
+            error_quantiles2 = [data[cmask2 & error_mask][f'p{p}'] for p in PERCENTILES]
             error_delta = np.array(error_quantiles2) - np.array(error_quantiles1)
             
-            accurate_quantiles1 = [data[cmask1 & accurate_mask][f'p{p}'].iloc[0] for p in PERCENTILES]
-            accurate_quantiles2 = [data[cmask2 & accurate_mask][f'p{p}'].iloc[0] for p in PERCENTILES]
+            # Calculate RT differences for accurate responses
+            accurate_quantiles1 = [data[cmask1 & accurate_mask][f'p{p}'] for p in PERCENTILES]
+            accurate_quantiles2 = [data[cmask2 & accurate_mask][f'p{p}'] for p in PERCENTILES]
             accurate_delta = np.array(accurate_quantiles2) - np.array(accurate_quantiles1)
             
+            # Plot overall RT differences
             axes[i,j].plot(PERCENTILES, overall_delta, color='black', **marker_style)
+            
+            # Plot error and accurate RT differences
             axes[j,i].plot(PERCENTILES, error_delta, color='red', **marker_style)
             axes[j,i].plot(PERCENTILES, accurate_delta, color='green', **marker_style)
             axes[j,i].legend(['Error', 'Accurate'], loc='upper left')
 
+            # Set y-axis limits and add reference line
             axes[i,j].set_ylim(bottom=-1/3, top=1/2)
             axes[j,i].set_ylim(bottom=-1/3, top=1/2)
             axes[i,j].axhline(y=0, color='gray', linestyle='--', alpha=0.5) 
             axes[j,i].axhline(y=0, color='gray', linestyle='--', alpha=0.5)
             
+            # Add condition labels
             axes[i,j].text(50, -0.27, 
                           f'{CONDITION_NAMES[conditions[j]]} - {CONDITION_NAMES[conditions[i]]}', 
                           ha='center', va='top', fontsize=12)
+            
             axes[j,i].text(50, -0.27, 
                           f'{CONDITION_NAMES[conditions[j]]} - {CONDITION_NAMES[conditions[i]]}', 
                           ha='center', va='top', fontsize=12)
             
-    plt.tight_layout()
-    output_path = OUTPUT_DIR / f'delta_plots_participant_{pnum}.png'
-    plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    print(f"Saved delta plot to: {output_path}")
-    plt.close()
+            plt.tight_layout()
+            
+    # Save the figure
+    plt.savefig(OUTPUT_DIR / "delta_plots_participant_1.png")
 
-
-def compare_manipulations():
-    """Compare the effects of trial difficulty vs stimulus complexity."""
-    print("\n" + "="*60)
-    print("COMPARISON: TRIAL DIFFICULTY vs STIMULUS COMPLEXITY")
-    print("="*60)
-    
-    print("\nBased on the factorial SDT model and delta plot analysis:")
-    print("\nTRIAL DIFFICULTY effects:")
-    print("  ✓ Strong, reliable effect on sensitivity (d')")
-    print("  ✓ Clear effect on response bias (more conservative)")
-    print("  ✓ Large impact on RT distributions (delta plots)")
-    print("  ✓ Greater cognitive load and decision conflict")
-    
-    print("\nSTIMULUS COMPLEXITY effects:")
-    print("  ✓ Smaller, less certain effect on sensitivity")
-    print("  ✓ Minimal influence on response bias")
-    print("  ✓ Modest impact on RT (more uniform across response types)")
-    print("  ✓ Primary effect is slowing without altering detection criteria")
-    
-    print("\nCONCLUSION:")
-    print("Trial difficulty is the stronger determinant of perceptual")
-    print("decision-making performance, affecting both accuracy and speed.")
-    print("Stimulus complexity primarily affects processing speed without")
-    print("substantially altering detection sensitivity or decision criteria.")
-
-# === Additional Utility Functions for Output Files ===
 def save_summary_and_posteriors(trace):
+    """Save summary and posterior plots for hierarchical model."""
     summary = az.summary(trace, var_names=[
-        'intercept_d', 'stim_effect_d', 'diff_effect_d',
-        'intercept_c', 'stim_effect_c', 'diff_effect_c'
+        'mean_d_prime', 'mean_criterion', 'stdev_d_prime', 'stdev_criterion'
     ])
     summary.to_csv(OUTPUT_DIR / "sdt_summary.csv")
+
     az.plot_forest(trace, var_names=[
-        'intercept_d', 'stim_effect_d', 'diff_effect_d',
-        'intercept_c', 'stim_effect_c', 'diff_effect_c'
+        'mean_d_prime', 'mean_criterion'
     ], combined=True)
-    plt.title("Posterior Distributions")
+    plt.title("Posterior Distributions (Group-Level Means)")
     plt.tight_layout()
     plt.savefig(OUTPUT_DIR / "sdt_posteriors.png")
     plt.close()
@@ -454,6 +376,32 @@ def save_rt_differences(delta_data):
     diff_df = pd.DataFrame(diff_list)
     diff_df.to_csv(OUTPUT_DIR / 'rt_differences_HardComplex_vs_EasySimple.csv', index=False)
 
+def compare_manipulations():
+    """Compare the effects of trial difficulty vs stimulus complexity."""
+    print("\n" + "="*60)
+    print("COMPARISON: TRIAL DIFFICULTY vs STIMULUS COMPLEXITY")
+    print("="*60)
+    
+    print("\nBased on the factorial SDT model and delta plot analysis:")
+    print("\nTRIAL DIFFICULTY effects:")
+    print("  ✓ Strong, reliable effect on sensitivity (d')")
+    print("  ✓ Clear effect on response bias (more conservative)")
+    print("  ✓ Large impact on RT distributions (delta plots)")
+    print("  ✓ Greater cognitive load and decision conflict")
+    
+    print("\nSTIMULUS COMPLEXITY effects:")
+    print("  ✓ Smaller, less certain effect on sensitivity")
+    print("  ✓ Minimal influence on response bias")
+    print("  ✓ Modest impact on RT (more uniform across response types)")
+    print("  ✓ Primary effect is slowing without altering detection criteria")
+    
+    print("\nCONCLUSION:")
+    print("Trial difficulty is the stronger determinant of perceptual")
+    print("decision-making performance, affecting both accuracy and speed.")
+    print("Stimulus complexity primarily affects processing speed without")
+    print("substantially altering detection sensitivity or decision criteria.")
+
+# === MAIN EXECUTION BLOCK ===
 if __name__ == "__main__":
     from pathlib import Path
     import pymc as pm
@@ -461,50 +409,46 @@ if __name__ == "__main__":
     import matplotlib.pyplot as plt
 
     print("=" * 60)
-    print("FACTORIAL SDT + DELTA PLOT ANALYSIS PIPELINE")
+    print("HIERARCHICAL SDT + DELTA PLOT ANALYSIS PIPELINE")
     print("=" * 60)
 
-    # Optional: print README contents
+    # Print README if available
     readme_path = Path(__file__).parent / "README.md"
     if readme_path.exists():
         with open(readme_path, 'r') as f:
             print(f.read())
 
-    # Load data file
+    # Load data
     data_path = Path(__file__).parent / "data.csv"
     if not data_path.exists():
         print(f"Data file not found at: {data_path}")
-        print("Please ensure 'data.csv' exists in the project directory.")
         exit()
 
     print("\nLOADING AND PREPARING DATA...")
     sdt_data = read_data(data_path, prepare_for='sdt', display=True)
     delta_data = read_data(data_path, prepare_for='delta plots', display=True)
 
-    print("\nRUNNING FACTORIAL SDT MODEL...")
-    model = apply_factorial_sdt_model(sdt_data)
+    print("\nRUNNING HIERARCHICAL SDT MODEL...")
+    model = apply_hierarchical_sdt_model(sdt_data)
     with model:
         trace = pm.sample(draws=1000, tune=1000, target_accept=0.95, return_inferencedata=True)
 
     print("Model sampling completed!")
 
-    # Save and visualize model outputs
+    # Diagnostics and summaries
     print("\nGENERATING CONVERGENCE DIAGNOSTICS...")
     az.plot_trace(trace, var_names=[
-        'intercept_d', 'stim_effect_d', 'diff_effect_d',
-        'intercept_c', 'stim_effect_c', 'diff_effect_c'
+        'mean_d_prime', 'mean_criterion', 'stdev_d_prime', 'stdev_criterion'
     ])
     plt.tight_layout()
+    plt.savefig(OUTPUT_DIR / "sdt_trace_plot.png")
     plt.show()
-
-    print("\nPLOTTING POSTERIOR EFFECTS...")
-    plot_posterior_effects(trace)
 
     print("\nSAVING MODEL SUMMARY AND POSTERIORS...")
     save_summary_and_posteriors(trace)
 
     print("\nSUMMARIZING POSTERIOR INTERPRETATIONS...")
-    summarize_effects(trace)
+    summarize_hierarchical_effects(trace)
 
     # Delta plot analysis
     print("\nCREATING DELTA PLOTS FOR FIRST PARTICIPANT...")
@@ -520,7 +464,7 @@ if __name__ == "__main__":
     print("SAVING RT DIFFERENCES SUMMARY...")
     save_rt_differences(delta_data)
 
-    print("\nOPTIONAL: COMPARING MANIPULATIONS...")
+    print("\nCOMPARING MANIPULATIONS...")
     compare_manipulations()
 
     print("\n" + "=" * 60)

@@ -208,17 +208,8 @@ def apply_factorial_sdt_model(data):
 
 def plot_posterior_effects(trace):
     """Create forest plot showing posterior distributions of main effects."""
-    # Create output directory
-    OUTPUT_DIR = Path(__file__).parent.parent.parent / 'output'
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    
-    # Extract posterior samples
-    posterior = trace.posterior
-    
-    # Create forest plot
     fig, axes = plt.subplots(1, 2, figsize=(12, 6))
     
-    # D-prime effects
     effects_d = ['intercept_d', 'stim_effect_d', 'diff_effect_d']
     labels_d = ['Intercept', 'Stimulus Type\n(Complex - Simple)', 'Difficulty\n(Hard - Easy)']
     
@@ -228,7 +219,6 @@ def plot_posterior_effects(trace):
     axes[0].set_yticklabels(labels_d)
     axes[0].axvline(0, color='red', linestyle='--', alpha=0.7)
     
-    # Criterion effects  
     effects_c = ['intercept_c', 'stim_effect_c', 'diff_effect_c']
     labels_c = ['Intercept', 'Stimulus Type\n(Complex - Simple)', 'Difficulty\n(Hard - Easy)']
     
@@ -239,8 +229,11 @@ def plot_posterior_effects(trace):
     axes[1].axvline(0, color='red', linestyle='--', alpha=0.7)
     
     plt.tight_layout()
-    plt.savefig(OUTPUT_DIR / 'posterior_effects.png', dpi=300, bbox_inches='tight')
-    plt.show()
+    output_path = OUTPUT_DIR / 'posterior_effects.png'
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    print(f"Saved posterior effects plot to: {output_path}")
+    plt.close()
+
 
 def summarize_effects(trace):
     """Print detailed summary of main effects with interpretation."""
@@ -304,22 +297,11 @@ def summarize_effects(trace):
 
 def draw_delta_plots(data, pnum):
     """Draw delta plots comparing RT distributions between condition pairs."""
-    # Filter data for specified participant
     data = data[data['pnum'] == pnum]
-    
-    # Get unique conditions and create subplot matrix
     conditions = data['condition'].unique()
     n_conditions = len(conditions)
     
-    # Create figure with subplots matrix
-    fig, axes = plt.subplots(n_conditions, n_conditions, 
-                            figsize=(4*n_conditions, 4*n_conditions))
-    
-    # Create output directory
-    OUTPUT_DIR = Path(__file__).parent.parent.parent / 'output'
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    
-    # Define marker style for plots
+    fig, axes = plt.subplots(n_conditions, n_conditions, figsize=(4*n_conditions, 4*n_conditions))
     marker_style = {
         'marker': 'o',
         'markersize': 10,
@@ -328,70 +310,59 @@ def draw_delta_plots(data, pnum):
         'linewidth': 3
     }
     
-    # Create delta plots for each condition pair
     for i, cond1 in enumerate(conditions):
         for j, cond2 in enumerate(conditions):
-            # Add labels only to edge subplots
             if j == 0:
                 axes[i,j].set_ylabel('Difference in RT (s)', fontsize=12)
             if i == len(axes)-1:
                 axes[i,j].set_xlabel('Percentile', fontsize=12)
-                
-            # Skip diagonal and lower triangle for overall plots
             if i > j:
                 continue
             if i == j:
                 axes[i,j].axis('off')
                 continue
             
-            # Create masks for condition and plotting mode
             cmask1 = data['condition'] == cond1
             cmask2 = data['condition'] == cond2
             overall_mask = data['mode'] == 'overall'
             error_mask = data['mode'] == 'error'
             accurate_mask = data['mode'] == 'accurate'
             
-            # Calculate RT differences for overall performance
             quantiles1 = [data[cmask1 & overall_mask][f'p{p}'].iloc[0] for p in PERCENTILES]
             quantiles2 = [data[cmask2 & overall_mask][f'p{p}'].iloc[0] for p in PERCENTILES]
             overall_delta = np.array(quantiles2) - np.array(quantiles1)
             
-            # Calculate RT differences for error responses
             error_quantiles1 = [data[cmask1 & error_mask][f'p{p}'].iloc[0] for p in PERCENTILES]
             error_quantiles2 = [data[cmask2 & error_mask][f'p{p}'].iloc[0] for p in PERCENTILES]
             error_delta = np.array(error_quantiles2) - np.array(error_quantiles1)
             
-            # Calculate RT differences for accurate responses
             accurate_quantiles1 = [data[cmask1 & accurate_mask][f'p{p}'].iloc[0] for p in PERCENTILES]
             accurate_quantiles2 = [data[cmask2 & accurate_mask][f'p{p}'].iloc[0] for p in PERCENTILES]
             accurate_delta = np.array(accurate_quantiles2) - np.array(accurate_quantiles1)
             
-            # Plot overall RT differences
             axes[i,j].plot(PERCENTILES, overall_delta, color='black', **marker_style)
-            
-            # Plot error and accurate RT differences
             axes[j,i].plot(PERCENTILES, error_delta, color='red', **marker_style)
             axes[j,i].plot(PERCENTILES, accurate_delta, color='green', **marker_style)
             axes[j,i].legend(['Error', 'Accurate'], loc='upper left')
 
-            # Set y-axis limits and add reference line
             axes[i,j].set_ylim(bottom=-1/3, top=1/2)
             axes[j,i].set_ylim(bottom=-1/3, top=1/2)
             axes[i,j].axhline(y=0, color='gray', linestyle='--', alpha=0.5) 
             axes[j,i].axhline(y=0, color='gray', linestyle='--', alpha=0.5)
             
-            # Add condition labels
             axes[i,j].text(50, -0.27, 
                           f'{CONDITION_NAMES[conditions[j]]} - {CONDITION_NAMES[conditions[i]]}', 
                           ha='center', va='top', fontsize=12)
-            
             axes[j,i].text(50, -0.27, 
                           f'{CONDITION_NAMES[conditions[j]]} - {CONDITION_NAMES[conditions[i]]}', 
                           ha='center', va='top', fontsize=12)
             
     plt.tight_layout()
-    plt.savefig(OUTPUT_DIR / f'delta_plots_participant_{pnum}.png', dpi=300, bbox_inches='tight')
-    plt.show()
+    output_path = OUTPUT_DIR / f'delta_plots_participant_{pnum}.png'
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    print(f"Saved delta plot to: {output_path}")
+    plt.close()
+
 
 def compare_manipulations():
     """Compare the effects of trial difficulty vs stimulus complexity."""
@@ -483,65 +454,42 @@ def save_rt_differences(delta_data):
     diff_df = pd.DataFrame(diff_list)
     diff_df.to_csv(OUTPUT_DIR / 'rt_differences_HardComplex_vs_EasySimple.csv', index=False)
 
-# === Main Execution Update ===
 if __name__ == "__main__":
-    print("Loading and preparing data...")
-    sdt_data = read_data("data.csv", prepare_for='sdt', display=True)
-    delta_data = read_data("data.csv", prepare_for='delta plots', display=False)
+    from pathlib import Path
+    import pymc as pm
+    import arviz as az
+    import matplotlib.pyplot as plt
 
-    print("Running factorial SDT model...")
-    model = apply_factorial_sdt_model(sdt_data)
-    with model:
-        trace = pm.sample(1000, tune=1000, target_accept=0.95, return_inferencedata=True)
+    print("=" * 60)
+    print("FACTORIAL SDT + DELTA PLOT ANALYSIS PIPELINE")
+    print("=" * 60)
 
-    print("Saving posterior summaries and plots...")
-    save_summary_and_posteriors(trace)
+    # Optional: print README contents
+    readme_path = Path(__file__).parent / "README.md"
+    if readme_path.exists():
+        with open(readme_path, 'r') as f:
+            print(f.read())
 
-    print("Saving delta contrast plot...")
-    save_delta_contrast_plot(delta_data)
-
-    print("Saving RT differences summary...")
-    save_rt_differences(delta_data)
-
-    print("All results saved to the 'output' directory.")
-
-# Main execution
-if __name__ == "__main__":
-    # Print README content
-    file_to_print = Path(__file__).parent / 'README.md'
-    if file_to_print.exists():
-        with open(file_to_print, 'r') as file:
-            print(file.read())
-
-    # Load and prepare data
+    # Load data file
     data_path = Path(__file__).parent / "data.csv"
-    
     if not data_path.exists():
-        print(f"Warning: {data_path} not found. Please ensure data file exists.")
-        print("Creating mock data for demonstration...")
-        # You would replace this with actual data loading
+        print(f"Data file not found at: {data_path}")
+        print("Please ensure 'data.csv' exists in the project directory.")
         exit()
-    
-    print("\n" + "="*60)
-    print("LOADING AND PREPARING DATA")
-    print("="*60)
-    
+
+    print("\nLOADING AND PREPARING DATA...")
     sdt_data = read_data(data_path, prepare_for='sdt', display=True)
     delta_data = read_data(data_path, prepare_for='delta plots', display=True)
 
-    print("\n" + "="*60)
-    print("RUNNING FACTORIAL SDT MODEL")
-    print("="*60)
-    
-    # Run the factorial SDT model
+    print("\nRUNNING FACTORIAL SDT MODEL...")
     model = apply_factorial_sdt_model(sdt_data)
     with model:
         trace = pm.sample(draws=1000, tune=1000, target_accept=0.95, return_inferencedata=True)
 
     print("Model sampling completed!")
-    
-    # Check convergence with trace plots
-    print("\nGenerating convergence diagnostics...")
+
+    # Save and visualize model outputs
+    print("\nGENERATING CONVERGENCE DIAGNOSTICS...")
     az.plot_trace(trace, var_names=[
         'intercept_d', 'stim_effect_d', 'diff_effect_d',
         'intercept_c', 'stim_effect_c', 'diff_effect_c'
@@ -549,29 +497,32 @@ if __name__ == "__main__":
     plt.tight_layout()
     plt.show()
 
-    # Plot posterior distributions
-    print("\nGenerating posterior effect plots...")
+    print("\nPLOTTING POSTERIOR EFFECTS...")
     plot_posterior_effects(trace)
-    
-    # Summarize effects with interpretation
+
+    print("\nSAVING MODEL SUMMARY AND POSTERIORS...")
+    save_summary_and_posteriors(trace)
+
+    print("\nSUMMARIZING POSTERIOR INTERPRETATIONS...")
     summarize_effects(trace)
 
-    print("\n" + "="*60)
-    print("GENERATING DELTA PLOTS")
-    print("="*60)
-    
-    # Generate delta plots for first participant
+    # Delta plot analysis
+    print("\nCREATING DELTA PLOTS FOR FIRST PARTICIPANT...")
     try:
-        first_participant = delta_data['pnum'].iloc[0]
-        print(f"Creating delta plots for participant {first_participant}...")
-        draw_delta_plots(delta_data, pnum=first_participant)
+        first_p = delta_data['pnum'].iloc[0]
+        draw_delta_plots(delta_data, pnum=first_p)
     except Exception as e:
         print(f"Error generating delta plots: {e}")
-    
-    # Final comparison
+
+    print("\nSAVING DELTA CONTRAST PLOT...")
+    save_delta_contrast_plot(delta_data)
+
+    print("SAVING RT DIFFERENCES SUMMARY...")
+    save_rt_differences(delta_data)
+
+    print("\nOPTIONAL: COMPARING MANIPULATIONS...")
     compare_manipulations()
-    
-    print("\n" + "="*60)
-    print("ANALYSIS COMPLETE!")
-    print("="*60)
-    print("Check the 'output' directory for saved figures.")
+
+    print("\n" + "=" * 60)
+    print("PIPELINE COMPLETE. CHECK 'output' DIRECTORY FOR RESULTS.")
+    print("=" * 60)

@@ -1,3 +1,5 @@
+# assisted with AI 
+
 import numpy as np
 import pandas as pd
 import pymc as pm
@@ -26,6 +28,7 @@ PERCENTILES = [10, 30, 50, 70, 90]
 OUTPUT_DIR = Path("output")
 OUTPUT_DIR.mkdir(exist_ok=True)
 
+# load and process data 
 def read_data(file_path, prepare_for='sdt', display=False):
     data = pd.read_csv(file_path)
     for col, mapping in MAPPINGS.items():
@@ -83,6 +86,7 @@ def read_data(file_path, prepare_for='sdt', display=False):
 
     return data
 
+# SDT model
 def apply_hierarchical_sdt_model(data):
     P = len(data['pnum'].unique())
     C = len(data['condition'].unique())
@@ -128,6 +132,7 @@ def apply_hierarchical_sdt_model(data):
 
     return sdt_model
 
+# contrast delta plot
 def save_delta_contrast_plot(delta_data, contrast=3, baseline=0):
     contrast_data = delta_data[(delta_data['condition'] == contrast) & (delta_data['mode'] == 'overall')]
     baseline_data = delta_data[(delta_data['condition'] == baseline) & (delta_data['mode'] == 'overall')]
@@ -153,6 +158,7 @@ def save_delta_contrast_plot(delta_data, contrast=3, baseline=0):
         plt.savefig(OUTPUT_DIR / "delta_plot_contrasts.png")
         plt.close()
 
+# main execution 
 def main():
     data_path = Path("data.csv")
     if not data_path.exists():

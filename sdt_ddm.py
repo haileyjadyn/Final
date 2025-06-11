@@ -97,6 +97,22 @@ def apply_hierarchical_sdt_model(data):
         d_prime = pm.Normal('d_prime', mu=mean_d_prime, sigma=stdev_d_prime, shape=(P, C))
         criterion = pm.Normal('criterion', mu=mean_criterion, sigma=stdev_criterion, shape=(P, C))
 
+        # Derived group-level effects for d-prime
+        stimulus_type_effect = pm.Deterministic(
+            'stimulus_type_effect',
+            (mean_d_prime[1] + mean_d_prime[3]) / 2 - (mean_d_prime[0] + mean_d_prime[2]) / 2
+        )
+
+        trial_difficulty_effect = pm.Deterministic(
+            'trial_difficulty_effect',
+            (mean_d_prime[2] + mean_d_prime[3]) / 2 - (mean_d_prime[0] + mean_d_prime[1]) / 2
+        )
+
+        interaction_effect = pm.Deterministic(
+            'interaction_effect',
+            (mean_d_prime[3] - mean_d_prime[1]) - (mean_d_prime[2] - mean_d_prime[0])
+        )
+
         hit_rate = pm.math.invlogit(d_prime - criterion)
         false_alarm_rate = pm.math.invlogit(-criterion)
 
@@ -136,7 +152,6 @@ def save_delta_contrast_plot(delta_data, contrast=3, baseline=0):
         plt.tight_layout()
         plt.savefig(OUTPUT_DIR / "delta_plot_contrasts.png")
         plt.close()
-
 
 def main():
     data_path = Path("data.csv")
